@@ -1,0 +1,124 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environment
+venv/
+ENV/
+env/
+.venv
+env.bak/
+venv.bak/
+
+# Environment Variables
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.sublime-project
+*.sublime-workspace
+.project
+.pydevproject
+.settings/
+*.sublime-settings
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.hypothesis/
+*.cover
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+
+# File Storage
+storage/
+uploads/
+temp/
+tmp/
+
+# SSL Certificates (Keep only templates)
+certs/*.pem
+!certs/.gitkeep
+cert.pem
+key.pem
+*.pem
+
+# Logs
+*.log
+logs/
+*.log.*
+
+# OS
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.directory
+
+# Node modules (if frontend included)
+node_modules/
+package-lock.json
+yarn.lock
+
+# Build artifacts
+dist/
+build/
+*.tar.gz
+*.zip
+
+# Docker
+docker-compose.override.yml
+.dockerignore
+
+# Misc
+.nyc_output/
+.env.prod
+.env.test
+*.bak
+*.tmp
+*.temp
+.vscode-test
