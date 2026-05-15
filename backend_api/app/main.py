@@ -1400,19 +1400,28 @@ def share_file_with_users(
 
         created_count = 0
         updated_count = 0
+        print(
+            f"DEBUG SHARE: Processing {len(recipient_rows)} recipients for file {file_id}")
         for recipient in recipient_rows:
             if recipient["id"] == current_user["id"]:
+                print(f"DEBUG SHARE: Skipping owner {current_user['id']}")
                 continue
 
             existing_share_id = existing_by_recipient_id.get(recipient["id"])
+            print(
+                f"DEBUG SHARE: Recipient {recipient['username']} ({recipient['id']}) - existing_share: {existing_share_id}")
+
             if existing_share_id is None:
+                share_id = secrets.token_urlsafe(16)
+                print(
+                    f"DEBUG SHARE: Creating share {share_id} for {recipient['username']}")
                 connection.execute(
                     """
                     INSERT INTO file_shares (id, file_id, owner_id, recipient_id, permission, password_salt, password_hash, created_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
-                        secrets.token_urlsafe(16),
+                        share_id,
                         file_id,
                         current_user["id"],
                         recipient["id"],
@@ -1423,7 +1432,10 @@ def share_file_with_users(
                     ),
                 )
                 created_count += 1
+                print(f"DEBUG SHARE: Share created successfully")
             else:
+                print(
+                    f"DEBUG SHARE: Updating share {existing_share_id} for {recipient['username']}")
                 connection.execute(
                     "UPDATE file_shares SET permission = ?, password_salt = ?, password_hash = ? WHERE id = ?",
                     (permission, password_salt,
@@ -1431,7 +1443,10 @@ def share_file_with_users(
                 )
                 updated_count += 1
 
+        print(
+            f"DEBUG SHARE: Committing transaction with {created_count} created, {updated_count} updated")
         connection.commit()
+        print(f"DEBUG SHARE: Commit complete")
 
     log_audit_event(
         action="share_file_with_users",
@@ -1481,6 +1496,12 @@ def list_shared_files(current_user: dict[str, str] = Depends(_get_current_user))
             (current_user["id"],),
         ).fetchall()
 
+        print(
+            f"DEBUG LIST SHARED: User {current_user['id']} has {len(rows)} shared files")
+        for row in rows:
+            print(
+                f"  - File: {row['file_id']} ({row['file_name']}) from {row['owner_username']}")
+
     return [
         SharedFileRecord(
             file_id=row["file_id"],
@@ -1501,7 +1522,29 @@ def _download_shared_file_impl(
     current_user: dict[str, str],
     password: str | None,
 ) -> StreamingResponse:
+    print(
+        f"DEBUG DOWNLOAD: User {current_user['id']} attempting to download file {file_id}")
+
+    # DEBUG: Check if file exists
     with get_connection() as connection:
+        file_exists = connection.execute(
+            "SELECT id, name FROM files WHERE id = ?",
+            (file_id,),
+        ).fetchone()
+        print(f"  File exists: {bool(file_exists)}")
+
+        # DEBUG: Check if share record exists
+        share_exists = connection.execute(
+            "SELECT id, recipient_id, owner_id, permission FROM file_shares WHERE file_id = ?",
+            (file_id,),
+        ).fetchone()
+        print(f"  Share exists: {bool(share_exists)}")
+        if share_exists:
+            print(f"    - Shared with: {share_exists['recipient_id']}")
+            print(f"    - Owner: {share_exists['owner_id']}")
+            print(f"    - Permission: {share_exists['permission']}")
+
+        # DEBUG: Check if user has access
         row = connection.execute(
             """
             SELECT
@@ -1518,13 +1561,19 @@ def _download_shared_file_impl(
             """,
             (file_id, current_user["id"]),
         ).fetchone()
+        print(f"  User has access: {bool(row)}")
 
     if row is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Shared file not found",
-        )
+        # Detailed error message for debugging
+        error_detail = "Shared file not found"
+        if not file_exists:
+            error_detail = f"File {file_id} does not exist"
+        elif not share_exists:
+            error_detail = f"File {file_id} has no shares"
+        elif share_exists and current_user["id"] != share_exists["recipient_id"]:
+            error_detail = f"You are not the recipient of this shared file (recipient_id: {share_exists['recipient_id']}, your id: {current_user['id']})"
 
+        print(f"  ERROR: {error_detail}")
     if row["permission"] != "download":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -1558,6 +1607,12 @@ def _download_shared_file_impl(
         connection.commit()
 
     try:
+        print(
+            f"  DEBUG: Calling download_file with transfer_token={transfer_token}")
+        print(f"  DEBUG: File name to download: {row['name']}")
+        print(
+            f"  DEBUG: Socket server: {os.environ.get('SOCKET_HOST', '127.0.0.1')}:{os.environ.get('SOCKET_PORT', '9000')}")
+
         stream = download_file(
             os.environ.get("SOCKET_HOST", "127.0.0.1"),
             int(os.environ.get("SOCKET_PORT", "9000")),
@@ -1565,8 +1620,11 @@ def _download_shared_file_impl(
             row["name"],
         )
         stream = _prime_stream_for_response(stream)
+        print(f"  DEBUG: Download stream obtained successfully")
     except RuntimeError as exc:
         error_message = str(exc)
+        print(f"  ERROR in download_file: {error_message}")
+
         log_audit_event(
             action="shared_file_download",
             status="failed",
@@ -1578,6 +1636,7 @@ def _download_shared_file_impl(
                      "message": error_message},
         )
         if "file not found" in error_message.lower():
+            print(f"  ERROR: Socket server reports file not found!")
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Shared file is no longer available",
@@ -1602,6 +1661,57 @@ def _download_shared_file_impl(
                  "used_password": bool(row["password_hash"])},
     )
     return StreamingResponse(stream, media_type="application/octet-stream", headers=headers)
+
+
+@app.get("/api/debug/shared-files/{file_id}")
+def debug_shared_file(
+    file_id: str,
+    current_user: dict[str, str] = Depends(_get_current_user),
+) -> dict:
+    """DEBUG endpoint - Check why a shared file download fails"""
+    with get_connection() as connection:
+        # Check if file exists
+        file_row = connection.execute(
+            "SELECT id, name, owner_id FROM files WHERE id = ?",
+            (file_id,),
+        ).fetchone()
+
+        # Check all shares for this file
+        all_shares = connection.execute(
+            "SELECT id, file_id, owner_id, recipient_id, permission FROM file_shares WHERE file_id = ?",
+            (file_id,),
+        ).fetchall()
+
+        # Check if current user is a recipient
+        my_share = connection.execute(
+            "SELECT id, file_id, recipient_id, owner_id, permission FROM file_shares WHERE file_id = ? AND recipient_id = ?",
+            (file_id, current_user["id"]),
+        ).fetchone()
+
+    return {
+        "file_id": file_id,
+        "current_user_id": current_user["id"],
+        "file_exists": bool(file_row),
+        "file_info": {
+            "id": file_row["id"],
+            "name": file_row["name"],
+            "owner_id": file_row["owner_id"],
+        } if file_row else None,
+        "total_shares": len(all_shares) if all_shares else 0,
+        "all_shares": [
+            {
+                "recipient_id": s["recipient_id"],
+                "owner_id": s["owner_id"],
+                "permission": s["permission"],
+            }
+            for s in all_shares
+        ] if all_shares else [],
+        "my_share": {
+            "recipient_id": my_share["recipient_id"],
+            "permission": my_share["permission"],
+        } if my_share else None,
+        "can_download": bool(my_share),
+    }
 
 
 @app.get("/api/shared-files/{file_id}/download")

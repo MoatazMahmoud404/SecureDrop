@@ -33,6 +33,9 @@ Implementation starter for a secure file transfer web application with a Next.js
    - `npm install`
    - `npm run dev`
 
+6. Create an admin user for testing:
+   - `python scripts/create_admin.py admin`
+
 ## API flow
 
 - `POST /api/auth/register` and `POST /api/auth/login` manage authentication.

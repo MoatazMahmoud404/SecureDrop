@@ -214,14 +214,34 @@ def _handle_client(connection: ssl.SSLSocket, address: tuple[str, int]) -> None:
                 connection.sendall(b"ERROR invalid or expired token\n")
                 return
 
-            user_dir = STORAGE_DIR / transfer["user_id"]
+            # For shared file downloads, we need to look up the owner_id from the files table
+            # because the file is stored in STORAGE_DIR / owner_id / file_name, not in recipient's directory
+            file_owner_id = None
+            if transfer["file_id"]:
+                # Query the files table to get the owner
+                with DB_LOCK:
+                    db_conn = sqlite3.connect(DB_PATH)
+                    db_conn.row_factory = sqlite3.Row
+                    try:
+                        file_row = db_conn.execute(
+                            "SELECT owner_id FROM files WHERE id = ?",
+                            (transfer["file_id"],)
+                        ).fetchone()
+                        if file_row:
+                            file_owner_id = file_row["owner_id"]
+                    finally:
+                        db_conn.close()
+
+            # Use owner_id if we found it (shared download), otherwise use transfer user_id (normal upload)
+            user_dir = STORAGE_DIR / (file_owner_id or transfer["user_id"])
             target_path = user_dir / file_name
+
             if not target_path.exists():
                 connection.sendall(b"ERROR file not found\n")
                 return
 
             expected_checksum = _get_file_checksum(
-                transfer["user_id"], file_name)
+                file_owner_id or transfer["user_id"], file_name)
             if expected_checksum is not None:
                 actual_checksum = _file_sha256(target_path)
                 if actual_checksum != expected_checksum:
